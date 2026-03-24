@@ -54,7 +54,7 @@ function parseUtcLikeDate(value) {
 
 function toGmt6DateKey(value) {
   const parsed = parseUtcLikeDate(value);
-  if (!parsed) return '';
+  if (!parsed || isNaN(parsed.getTime())) return null;
   const shifted = parsed.getTime() + (6 * 60 * 60 * 1000);
   return formatDateKeyFromMs(shifted);
 }
@@ -67,7 +67,7 @@ function inDateRange(dateKey, startDate, endDate) {
 }
 
 function refreshGlobalDateBounds() {
-  const allDates = [...rawRows.map(row => row.localDate), ...bridgerpayApprovalRows.map(row => row.localDate)].filter(Boolean).sort();
+  const allDates = [...rawRows.map(row => row.localDate), ...bridgerpayApprovalRows.map(row => row.localDate)].filter(d => d && d !== 'Invalid Date' && d.length === 10).sort();
   const startEl = document.getElementById('globalStartDate');
   const endEl = document.getElementById('globalEndDate');
 
