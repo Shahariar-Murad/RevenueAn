@@ -1,12 +1,6 @@
 google.charts.load('current', { packages: ['corechart', 'geochart'] });
 google.charts.setOnLoadCallback(init);
 
-const DATA_FILES = {
-  bridgerpay: 'data/bridgerpay.csv',
-  zen: 'data/zen.csv',
-  payprocc: 'data/payprocc.csv'
-};
-
 const COUNTRY_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
 const COUNTRY_FIXES = { UK: 'GB', EL: 'GR' };
 
@@ -29,9 +23,7 @@ function normalizeCountry(input) {
   const raw = String(input || '').trim().toUpperCase();
   const fixed = COUNTRY_FIXES[raw] || raw;
   if (!fixed) return { code: 'ZZ', name: 'Unknown' };
-  if (fixed.length === 2) {
-    return { code: fixed, name: COUNTRY_NAMES.of(fixed) || fixed };
-  }
+  if (fixed.length === 2) return { code: fixed, name: COUNTRY_NAMES.of(fixed) || fixed };
   return { code: 'ZZ', name: raw };
 }
 
@@ -40,13 +32,7 @@ function parseBridgerPay(rows) {
     .filter(row => String(row.status || '').toLowerCase() === 'approved')
     .map(row => {
       const country = normalizeCountry(row.country || row.cardCountry);
-      return {
-        source: 'bridgerpay',
-        psp: row.pspName || 'BridgerPay',
-        country: country.name,
-        code: country.code,
-        revenue: parseNumber(row.amount),
-      };
+      return { source: 'bridgerpay', psp: row.pspName || 'BridgerPay', country: country.name, code: country.code, revenue: parseNumber(row.amount) };
     })
     .filter(row => row.revenue > 0);
 }
@@ -56,13 +42,7 @@ function parseZen(rows) {
     .filter(row => String(row.transaction_type || '').toLowerCase() === 'purchase')
     .map(row => {
       const country = normalizeCountry(row.customer_country || row.card_country);
-      return {
-        source: 'zen',
-        psp: 'ZEN',
-        country: country.name,
-        code: country.code,
-        revenue: parseNumber(row.stl_amount || row.transaction_amount),
-      };
+      return { source: 'zen', psp: 'ZEN', country: country.name, code: country.code, revenue: parseNumber(row.stl_amount || row.transaction_amount) };
     })
     .filter(row => row.revenue > 0);
 }
@@ -73,13 +53,7 @@ function parsePayProcc(rows) {
     .filter(row => String(row.Type || '').toLowerCase() === 'sale')
     .map(row => {
       const country = normalizeCountry(row['Payer Country'] || row['Issuer Country']);
-      return {
-        source: 'payprocc',
-        psp: 'PayProcc',
-        country: country.name,
-        code: country.code,
-        revenue: parseNumber(row['Applied Amount']) || parseNumber(row.Amount),
-      };
+      return { source: 'payprocc', psp: 'PayProcc', country: country.name, code: country.code, revenue: parseNumber(row['Applied Amount']) || parseNumber(row.Amount) };
     })
     .filter(row => row.revenue > 0);
 }
@@ -109,10 +83,7 @@ function aggregateByPsp(rows, totalRevenue) {
     current.transactions += 1;
     map.set(row.psp, current);
   });
-  return Array.from(map.values()).map(item => ({
-    ...item,
-    revenueShare: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0,
-  }));
+  return Array.from(map.values()).map(item => ({ ...item, revenueShare: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0 }));
 }
 
 function aggregateByPspCountry(rows, totalRevenue) {
@@ -124,55 +95,23 @@ function aggregateByPspCountry(rows, totalRevenue) {
     current.transactions += 1;
     map.set(key, current);
   });
-  return Array.from(map.values()).map(item => ({
-    ...item,
-    revenueShare: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0,
-  }));
+  return Array.from(map.values()).map(item => ({ ...item, revenueShare: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0 }));
 }
 
-async function loadCsv(path) {
-  const response = await fetch(path);
-  const text = await response.text();
-  return Papa.parse(text, { header: true, skipEmptyLines: true }).data;
-}
-
-async function init() {
-  bindUpload('bridgerpayUpload', 'bridgerpay', parseBridgerPay);
-  bindUpload('zenUpload', 'zen', parseZen);
-  bindUpload('payproccUpload', 'payprocc', parsePayProcc);
-
-  document.getElementById('reloadBtn').addEventListener('click', async () => {
-    await loadDefaultData();
-    render();
-  });
+function init() {
+  bindUpload('bridgerpayUpload', 'bridgerpay', parseBridgerPay, 'bridgerpayStatus');
+  bindUpload('zenUpload', 'zen', parseZen, 'zenStatus');
+  bindUpload('payproccUpload', 'payprocc', parsePayProcc, 'payproccStatus');
 
   ['searchInput', 'pspFilter', 'sourceFilter', 'sortFilter'].forEach(id => {
     document.getElementById(id).addEventListener('input', render);
     document.getElementById(id).addEventListener('change', render);
   });
 
-  await loadDefaultData();
-  populatePspFilter();
-  render();
-}
-
-async function loadDefaultData() {
-  const [bp, zen, pp] = await Promise.all([
-    loadCsv(DATA_FILES.bridgerpay),
-    loadCsv(DATA_FILES.zen),
-    loadCsv(DATA_FILES.payprocc)
-  ]);
-
-  rawRows = [
-    ...parseBridgerPay(bp),
-    ...parseZen(zen),
-    ...parsePayProcc(pp)
-  ];
-
   populatePspFilter();
 }
 
-function bindUpload(inputId, sourceKey, parser) {
+function bindUpload(inputId, sourceKey, parser, statusId) {
   document.getElementById(inputId).addEventListener('change', (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -182,11 +121,18 @@ function bindUpload(inputId, sourceKey, parser) {
       complete: (results) => {
         const parsed = parser(results.data || []);
         rawRows = [...rawRows.filter(row => row.source !== sourceKey), ...parsed];
+        updateFileStatus(statusId, file.name, parsed.length);
         populatePspFilter();
         render();
       }
     });
   });
+}
+
+function updateFileStatus(statusId, fileName, rowCount) {
+  const el = document.getElementById(statusId);
+  el.textContent = `${fileName} • ${rowCount.toLocaleString()} qualifying rows`;
+  el.classList.add('loaded');
 }
 
 function populatePspFilter() {
@@ -198,6 +144,11 @@ function populatePspFilter() {
 }
 
 function render() {
+  const hasData = rawRows.length > 0;
+  document.getElementById('emptyState').style.display = hasData ? 'none' : 'block';
+  document.getElementById('dashboard').style.display = hasData ? 'block' : 'none';
+  if (!hasData) return;
+
   const search = document.getElementById('searchInput').value.trim().toLowerCase();
   const selectedPsp = document.getElementById('pspFilter').value;
   const selectedSource = document.getElementById('sourceFilter').value;
@@ -212,7 +163,6 @@ function render() {
 
   const totalRevenue = filtered.reduce((sum, row) => sum + row.revenue, 0);
   const totalTransactions = filtered.length;
-
   let countryData = aggregateByCountry(filtered, totalRevenue);
   let pspData = aggregateByPsp(filtered, totalRevenue);
   let pspCountryData = aggregateByPspCountry(filtered, totalRevenue);
@@ -254,11 +204,11 @@ function drawCountryBar(rows) {
   const chart = new google.visualization.ColumnChart(document.getElementById('countryBarChart'));
   chart.draw(data, {
     legend: 'none',
-    colors: ['#2563eb'],
+    colors: ['#4f8cff'],
     backgroundColor: 'transparent',
     chartArea: { left: 60, right: 20, top: 20, bottom: 80, width: '100%', height: '70%' },
-    hAxis: { slantedText: true, slantedTextAngle: 35 },
-    vAxis: { format: 'short' },
+    hAxis: { slantedText: true, slantedTextAngle: 35, textStyle: { color: '#dbeafe' } },
+    vAxis: { format: 'short', textStyle: { color: '#dbeafe' }, gridlines: { color: 'rgba(255,255,255,0.08)' } },
   });
 }
 
@@ -273,7 +223,8 @@ function drawPspPie(rows) {
     pieHole: 0.55,
     backgroundColor: 'transparent',
     chartArea: { left: 20, right: 20, top: 20, bottom: 20, width: '100%', height: '85%' },
-    colors: ['#2563eb', '#0f766e', '#7c3aed', '#ea580c', '#0891b2'],
+    colors: ['#4f8cff', '#16c2a3', '#8b5cf6', '#f97316', '#06b6d4'],
+    legend: { textStyle: { color: '#dbeafe' } }
   });
 }
 
@@ -282,17 +233,15 @@ function drawGeoChart(rows) {
   data.addColumn('string', 'Country');
   data.addColumn('number', 'Revenue');
   rows.forEach(row => {
-    if (row.code && row.code !== 'ZZ') {
-      data.addRow([row.code, row.revenue]);
-    }
+    if (row.code && row.code !== 'ZZ') data.addRow([row.code, row.revenue]);
   });
 
   const chart = new google.visualization.GeoChart(document.getElementById('geoChart'));
   chart.draw(data, {
     backgroundColor: 'transparent',
-    colorAxis: { colors: ['#dbeafe', '#2563eb'] },
-    datalessRegionColor: '#eceff4',
-    defaultColor: '#eceff4',
+    colorAxis: { colors: ['#11315f', '#4f8cff'] },
+    datalessRegionColor: '#102238',
+    defaultColor: '#102238',
     legend: 'none',
   });
 }
@@ -306,10 +255,11 @@ function drawPspCountryBar(rows) {
   const chart = new google.visualization.BarChart(document.getElementById('pspCountryChart'));
   chart.draw(data, {
     legend: 'none',
-    colors: ['#0f766e'],
+    colors: ['#16c2a3'],
     backgroundColor: 'transparent',
-    chartArea: { left: 140, right: 20, top: 20, bottom: 20, width: '70%', height: '75%' },
-    hAxis: { format: 'short' },
+    chartArea: { left: 160, right: 20, top: 20, bottom: 20, width: '70%', height: '75%' },
+    hAxis: { format: 'short', textStyle: { color: '#dbeafe' }, gridlines: { color: 'rgba(255,255,255,0.08)' } },
+    vAxis: { textStyle: { color: '#dbeafe' } },
   });
 }
 
@@ -349,12 +299,7 @@ function fillPspCountryTable(rows) {
 }
 
 function escapeHtml(value) {
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 }
 
 window.addEventListener('resize', () => {
