@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Revenue Dashboard</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://www.gstatic.com/charts/loader.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+</head>
+<body>
+  <div class="page">
+    <header class="header">
+      <div>
+        <h1>Revenue Dashboard</h1>
+        <p>
+          Country-wise revenue dashboard for <b>BridgerPay</b>, <b>ZEN</b>, and <b>PayProcc</b>.
+          It shows country revenue, PSP country-wise revenue, revenue share against total revenue,
+          and a world map for quick visualization.
+        </p>
+        <div class="badges">
+          <span>Sample CSV files already included</span>
+          <span>Static Vercel-ready project</span>
+          <span>PayProcc uses Applied Amount (USD) first</span>
+        </div>
+      </div>
+      <button id="reloadBtn" class="primary-btn">Reload sample files</button>
+    </header>
+
+    <section class="upload-grid">
+      <div class="upload-box">
+        <h3>Replace BridgerPay CSV</h3>
+        <p>Upload a fresh BridgerPay revenue file to override the sample data in the current browser session.</p>
+        <input type="file" id="bridgerpayUpload" accept=".csv" />
+      </div>
+      <div class="upload-box">
+        <h3>Replace ZEN CSV</h3>
+        <p>Upload a ZEN settlement report. Only <b>Purchase</b> rows are counted.</p>
+        <input type="file" id="zenUpload" accept=".csv" />
+      </div>
+      <div class="upload-box">
+        <h3>Replace PayProcc CSV</h3>
+        <p>Upload a PayProcc transaction file. Only successful <b>sale</b> rows are counted.</p>
+        <input type="file" id="payproccUpload" accept=".csv" />
+      </div>
+    </section>
+
+    <section class="filters card">
+      <div class="filter">
+        <label>Search by country or PSP</label>
+        <input type="text" id="searchInput" placeholder="Search country or PSP" />
+      </div>
+      <div class="filter">
+        <label>Filter by PSP</label>
+        <select id="pspFilter"></select>
+      </div>
+      <div class="filter">
+        <label>Filter by source</label>
+        <select id="sourceFilter">
+          <option value="All">All</option>
+          <option value="bridgerpay">BridgerPay</option>
+          <option value="zen">ZEN</option>
+          <option value="payprocc">PayProcc</option>
+        </select>
+      </div>
+      <div class="filter">
+        <label>Sort countries by</label>
+        <select id="sortFilter">
+          <option value="revenue">Revenue</option>
+          <option value="share">Revenue share %</option>
+        </select>
+      </div>
+    </section>
+
+    <section class="metrics-grid">
+      <div class="metric card">
+        <div class="metric-label">Total Revenue</div>
+        <div class="metric-value" id="totalRevenue">$0.00</div>
+        <div class="metric-sub">Combined from the filtered data</div>
+      </div>
+      <div class="metric card">
+        <div class="metric-label">Transactions</div>
+        <div class="metric-value" id="totalTransactions">0</div>
+        <div class="metric-sub">Qualifying revenue rows</div>
+      </div>
+      <div class="metric card">
+        <div class="metric-label">Top Country</div>
+        <div class="metric-value small-title" id="topCountry">-</div>
+        <div class="metric-sub" id="topCountrySub">No data</div>
+      </div>
+      <div class="metric card">
+        <div class="metric-label">Top PSP</div>
+        <div class="metric-value small-title" id="topPsp">-</div>
+        <div class="metric-sub" id="topPspSub">No data</div>
+      </div>
+    </section>
+
+    <section class="metrics-grid smaller">
+      <div class="metric card">
+        <div class="metric-label">Average Revenue per Transaction</div>
+        <div class="metric-value" id="avgRevenue">$0.00</div>
+      </div>
+      <div class="metric card">
+        <div class="metric-label">Countries Covered</div>
+        <div class="metric-value" id="countryCount">0</div>
+      </div>
+      <div class="metric card">
+        <div class="metric-label">PSP-Country Pairs</div>
+        <div class="metric-value" id="pairCount">0</div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Top 10 Countries by Revenue</h2>
+        <div id="countryBarChart" class="chart"></div>
+      </div>
+      <div class="card">
+        <h2>PSP Share of Revenue</h2>
+        <div id="pspPieChart" class="chart"></div>
+      </div>
+    </section>
+
+    <section class="grid-2">
+      <div class="card">
+        <h2>Revenue Map by Country</h2>
+        <div id="geoChart" class="chart map"></div>
+        <p class="note">Darker color means higher revenue within the current filter.</p>
+      </div>
+      <div class="card">
+        <h2>Top 10 PSP-Country Revenue Pairs</h2>
+        <div id="pspCountryChart" class="chart"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Country-wise Revenue Table</h2>
+      <div class="table-wrap">
+        <table id="countryTable">
+          <thead>
+            <tr>
+              <th>Country</th>
+              <th>Revenue</th>
+              <th>Revenue %</th>
+              <th>Transactions</th>
+              <th>PSP Count</th>
+              <th>PSPs</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>PSP Country-wise Revenue Table</h2>
+      <div class="table-wrap">
+        <table id="pspCountryTable">
+          <thead>
+            <tr>
+              <th>PSP</th>
+              <th>Country</th>
+              <th>Revenue</th>
+              <th>Revenue % of Total</th>
+              <th>Transactions</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <p class="note">
+        Revenue is analyzed in USD terms. For PayProcc, the dashboard first takes <b>Applied Amount</b> when present,
+        otherwise it falls back to <b>Amount</b>.
+      </p>
+    </section>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
