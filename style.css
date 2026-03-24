@@ -143,3 +143,101 @@ td { color: #e8effa; }
   }
   .hero { padding: 22px; align-items: flex-start; }
 }
+
+
+/* Make dropdown options visible on dark UI */
+.filter select,
+.upload-box input[type=file] {
+  color-scheme: dark;
+}
+.filter select option,
+.filter select optgroup {
+  background: #0f1b31;
+  color: #edf4ff;
+}
+.filter select:focus {
+  border-color: rgba(79,140,255,.45);
+  box-shadow: 0 0 0 3px rgba(79,140,255,.10);
+}
+
+.metrics-grid.three-up { grid-template-columns: repeat(3, 1fr); }
+.section-header.tight-top { margin-top: 8px; }
+.executive-summary-grid { margin-bottom: 16px; }
+.executive-card {
+  min-height: 130px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.executive-card .metric-value {
+  font-size: 30px;
+}
+.executive-card-card {
+  background: linear-gradient(135deg, rgba(79,140,255,.22), rgba(12,28,50,.96));
+}
+.executive-card-crypto {
+  background: linear-gradient(135deg, rgba(22,194,163,.22), rgba(12,28,50,.96));
+}
+.executive-card-p2p {
+  background: linear-gradient(135deg, rgba(139,92,246,.22), rgba(12,28,50,.96));
+}
+
+
+.hero-actions-wide { align-items: stretch; }
+.date-range-card {
+  min-width: 300px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255,255,255,.08);
+  background: rgba(255,255,255,.04);
+}
+.date-range-title {
+  font-size: 12px;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: #b7caf0;
+  margin-bottom: 10px;
+}
+.date-range-inputs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 10px;
+}
+.date-filter-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.date-filter-box label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.date-filter-box input[type="date"] {
+  padding: 11px 12px;
+  border: 1px solid rgba(255,255,255,.08);
+  border-radius: 12px;
+  font: inherit;
+  background: rgba(7,17,31,.82);
+  color: var(--text);
+  outline: none;
+}
+.gmt-note {
+  margin: -4px 2px 16px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+@media (max-width: 980px) {
+  .hero {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hero-actions-wide {
+    width: 100%;
+  }
+}
+@media (max-width: 720px) {
+  .date-range-inputs {
+    grid-template-columns: 1fr;
+  }
+}

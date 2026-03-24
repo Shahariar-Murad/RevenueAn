@@ -25,6 +25,78 @@ function parseNumber(value) {
   return Number.isFinite(num) ? num : 0;
 }
 
+function formatDateKeyFromMs(ms) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+function parseUtcLikeDate(value) {
+  if (value === null || value === undefined || value === '') return null;
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return new Date(value);
+  }
+
+  const text = String(value).trim();
+  if (!text) return null;
+
+  const payProccMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})\s+(AM|PM)$/i);
+  if (payProccMatch) {
+    let [, year, month, day, hour, minute, second, meridiem] = payProccMatch;
+    hour = Number(hour);
+    if (meridiem.toUpperCase() === 'PM' && hour !== 12) hour += 12;
+    if (meridiem.toUpperCase() === 'AM' && hour === 12) hour = 0;
+    return new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), hour, Number(minute), Number(second)));
+  }
+
+  const parsed = new Date(text);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function toGmt6DateKey(value) {
+  const parsed = parseUtcLikeDate(value);
+  if (!parsed) return '';
+  const shifted = parsed.getTime() + (6 * 60 * 60 * 1000);
+  return formatDateKeyFromMs(shifted);
+}
+
+function inDateRange(dateKey, startDate, endDate) {
+  if (!dateKey) return true;
+  if (startDate && dateKey < startDate) return false;
+  if (endDate && dateKey > endDate) return false;
+  return true;
+}
+
+function refreshGlobalDateBounds() {
+  const allDates = [...rawRows.map(row => row.localDate), ...bridgerpayApprovalRows.map(row => row.localDate)].filter(Boolean).sort();
+  const startEl = document.getElementById('globalStartDate');
+  const endEl = document.getElementById('globalEndDate');
+
+  if (!allDates.length) {
+    startEl.value = '';
+    endEl.value = '';
+    startEl.min = '';
+    startEl.max = '';
+    endEl.min = '';
+    endEl.max = '';
+    return;
+  }
+
+  const minDate = allDates[0];
+  const maxDate = allDates[allDates.length - 1];
+
+  startEl.min = minDate;
+  startEl.max = maxDate;
+  endEl.min = minDate;
+  endEl.max = maxDate;
+
+  if (!startEl.value || startEl.value < minDate || startEl.value > maxDate) startEl.value = minDate;
+  if (!endEl.value || endEl.value < minDate || endEl.value > maxDate) endEl.value = maxDate;
+
+  if (startEl.value > endEl.value) {
+    endEl.value = startEl.value;
+  }
+}
+
 function normalizeCountry(input) {
   const raw = String(input || '').trim().toUpperCase();
   const fixed = COUNTRY_FIXES[raw] || raw;
@@ -65,6 +137,7 @@ function parseBridgerPayRevenue(rows) {
         country: country.name,
         code: country.code,
         revenue: parseNumber(row.amount),
+        localDate: toGmt6DateKey(row.processing_date || row.completionDate || row.processingDate),
       };
     })
     .filter(row => row.revenue > 0);
@@ -89,6 +162,7 @@ function parseBridgerPayApproval(rows) {
         declineReason: normalizeText(row.declineReason, 'Unknown'),
         amount: parseNumber(row.amount),
         processingDate: normalizeText(row.processing_date || row.processingDate || row.completionDate, ''),
+        localDate: toGmt6DateKey(row.processing_date || row.completionDate || row.processingDate),
       };
     })
     .filter(row => row.orderKey !== 'Unknown Order');
@@ -105,6 +179,7 @@ function parseZen(rows) {
         country: country.name,
         code: country.code,
         revenue: parseNumber(row.stl_amount || row.transaction_amount),
+        localDate: toGmt6DateKey(row.stl_date || row.accepted_at || row.created_at),
       };
     })
     .filter(row => row.revenue > 0);
@@ -122,6 +197,7 @@ function parsePayProcc(rows) {
         country: country.name,
         code: country.code,
         revenue: parseNumber(row['Applied Amount']) || parseNumber(row.Amount),
+        localDate: toGmt6DateKey(row['Transaction Date']),
       };
     })
     .filter(row => row.revenue > 0);
@@ -250,7 +326,7 @@ function init() {
   bindUpload('zenUpload', 'zen', handleZenUpload, 'zenStatus');
   bindUpload('payproccUpload', 'payprocc', handlePayProccUpload, 'payproccStatus');
 
-  ['searchInput', 'pspFilter', 'sourceFilter', 'sortFilter'].forEach(id => {
+  ['searchInput', 'pspFilter', 'sourceFilter', 'sortFilter', 'globalStartDate', 'globalEndDate'].forEach(id => {
     document.getElementById(id).addEventListener('input', render);
     document.getElementById(id).addEventListener('change', render);
   });
@@ -262,6 +338,7 @@ function init() {
 
   populatePspFilter();
   populateApprovalFilters();
+  refreshGlobalDateBounds();
 }
 
 function bindUpload(inputId, sourceKey, handler, statusId) {
@@ -276,6 +353,7 @@ function bindUpload(inputId, sourceKey, handler, statusId) {
         updateFileStatus(statusId, file.name, results.data.length);
         populatePspFilter();
         populateApprovalFilters();
+        refreshGlobalDateBounds();
         render();
       },
       error: () => {
@@ -342,12 +420,15 @@ function renderRevenue() {
   const selectedPsp = document.getElementById('pspFilter').value;
   const selectedSource = document.getElementById('sourceFilter').value;
   const sortBy = document.getElementById('sortFilter').value;
+  const startDate = document.getElementById('globalStartDate').value;
+  const endDate = document.getElementById('globalEndDate').value;
 
   const filtered = rawRows.filter(row => {
     const searchOk = !search || row.country.toLowerCase().includes(search) || row.psp.toLowerCase().includes(search);
     const pspOk = selectedPsp === 'All' || row.psp === selectedPsp;
     const sourceOk = selectedSource === 'All' || row.source === selectedSource;
-    return searchOk && pspOk && sourceOk;
+    const dateOk = inDateRange(row.localDate, startDate, endDate);
+    return searchOk && pspOk && sourceOk && dateOk;
   });
 
   const totalRevenue = filtered.reduce((sum, row) => sum + row.revenue, 0);
@@ -375,6 +456,8 @@ function renderApproval() {
   const country = document.getElementById('approvalCountryFilter').value;
   const mid = document.getElementById('approvalMidFilter').value;
   const search = document.getElementById('approvalSearchInput').value.trim().toLowerCase();
+  const startDate = document.getElementById('globalStartDate').value;
+  const endDate = document.getElementById('globalEndDate').value;
 
   const filtered = bridgerpayApprovalRows.filter(row => {
     const typeOk = pspType === 'All' || row.pspType === pspType;
@@ -382,7 +465,8 @@ function renderApproval() {
     const countryOk = country === 'All' || row.country === country;
     const midOk = mid === 'All' || row.mid === mid;
     const searchOk = !search || row.psp.toLowerCase().includes(search) || row.country.toLowerCase().includes(search) || row.mid.toLowerCase().includes(search);
-    return typeOk && pspOk && countryOk && midOk && searchOk;
+    const dateOk = inDateRange(row.localDate, startDate, endDate);
+    return typeOk && pspOk && countryOk && midOk && searchOk && dateOk;
   });
 
   const overall = summarizeApproval(filtered);
@@ -397,6 +481,7 @@ function renderApproval() {
   byPspCountry.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
 
   updateApprovalMetrics(overall);
+  updateExecutiveSummaryCards(filtered);
   drawApprovalBar('approvalPspChart', getTopItems(byPsp), 'label', '#4f8cff');
   drawApprovalBar('approvalCountryChart', getTopItems(byCountry), 'label', '#16c2a3');
   drawApprovalBar('approvalMidChart', getTopItems(byMid), 'label', '#8b5cf6');
@@ -438,6 +523,23 @@ function updateApprovalMetrics(overall) {
   document.getElementById('approvalDeclinedOrders').textContent = overall.declined.toLocaleString();
   document.getElementById('approvalRetryRate').textContent = pct(overall.retryRate);
   document.getElementById('approvalRetrySub').textContent = `${overall.avgAttempts.toFixed(2)} avg attempts / order`;
+}
+
+
+function updateExecutiveSummaryCards(filtered) {
+  const typeTargets = [
+    { type: 'Card', ratioId: 'execCardRatio', subId: 'execCardSub' },
+    { type: 'Crypto', ratioId: 'execCryptoRatio', subId: 'execCryptoSub' },
+    { type: 'P2P', ratioId: 'execP2PRatio', subId: 'execP2PSub' },
+  ];
+
+  typeTargets.forEach(target => {
+    const subset = filtered.filter(row => row.pspType === target.type);
+    const summary = summarizeApproval(subset);
+    document.getElementById(target.ratioId).textContent = pct(summary.ratio);
+    document.getElementById(target.subId).textContent =
+      `${summary.total.toLocaleString()} orders · ${pct(summary.retryRate)} retry`;
+  });
 }
 
 function drawCountryBar(rows) {
@@ -676,6 +778,15 @@ function generateInsights({ filtered, overall, byPsp, byCountry, byMid, byPspCou
       .map(item => `${item.label}: ${pct(item.ratio)} on ${item.total.toLocaleString()} orders`)
       .join(' · ');
     insights.push(`PSP type split — ${typeLine}.`);
+
+    const bestType = [...typeSummary].sort((a, b) => b.ratio - a.ratio || b.total - a.total)[0];
+    const weakType = [...typeSummary].sort((a, b) => a.ratio - b.ratio || b.total - a.total)[0];
+    if (bestType) {
+      insights.push(`Best approval by PSP type is ${bestType.label} at ${pct(bestType.ratio)} across ${bestType.total.toLocaleString()} unique orders.`);
+    }
+    if (weakType && weakType.label !== bestType?.label) {
+      insights.push(`PSP type needing attention is ${weakType.label} at ${pct(weakType.ratio)} with ${pct(weakType.retryRate)} retry rate.`);
+    }
   }
 
   const weakPsp = byPsp.filter(item => item.total >= minVolume).sort((a, b) => a.ratio - b.ratio)[0];

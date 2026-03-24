@@ -15,9 +15,21 @@
         <div class="eyebrow">Payments Analytics</div>
         <h1>Revenue & Approval Dashboard</h1>
       </div>
-      <div class="hero-actions">
-        <span class="hero-chip">Upload files to start</span>
-        <span class="hero-chip">Vercel ready</span>
+      <div class="hero-actions hero-actions-wide">
+        <span class="hero-chip">All dates shown in GMT+6</span>
+        <div class="date-range-card">
+          <div class="date-range-title">Global Date Filter</div>
+          <div class="date-range-inputs">
+            <div class="date-filter-box">
+              <label for="globalStartDate">Start</label>
+              <input type="date" id="globalStartDate" />
+            </div>
+            <div class="date-filter-box">
+              <label for="globalEndDate">End</label>
+              <input type="date" id="globalEndDate" />
+            </div>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -99,6 +111,7 @@
           </select>
         </div>
       </section>
+      <div class="gmt-note">Global date filter is applied in GMT+6 across both revenue and approval sections.</div>
 
       <section class="metrics-grid">
         <div class="metric card accent-card">
@@ -283,6 +296,31 @@
             <div class="metric-label">Retry Rate</div>
             <div class="metric-value" id="approvalRetryRate">0.00%</div>
             <div class="metric-sub" id="approvalRetrySub">0.00 avg attempts / order</div>
+          </div>
+        </section>
+
+        <section class="section-header tight-top">
+          <div>
+            <div class="section-kicker">Approval by PSP Type</div>
+            <h2>Executive Summary by PSP Type</h2>
+          </div>
+        </section>
+
+        <section class="metrics-grid three-up executive-summary-grid">
+          <div class="metric card executive-card executive-card-card">
+            <div class="metric-label">Card</div>
+            <div class="metric-value" id="execCardRatio">0.00%</div>
+            <div class="metric-sub" id="execCardSub">0 orders · 0.00% retry</div>
+          </div>
+          <div class="metric card executive-card executive-card-crypto">
+            <div class="metric-label">Crypto</div>
+            <div class="metric-value" id="execCryptoRatio">0.00%</div>
+            <div class="metric-sub" id="execCryptoSub">0 orders · 0.00% retry</div>
+          </div>
+          <div class="metric card executive-card executive-card-p2p">
+            <div class="metric-label">P2P</div>
+            <div class="metric-value" id="execP2PRatio">0.00%</div>
+            <div class="metric-sub" id="execP2PSub">0 orders · 0.00% retry</div>
           </div>
         </section>
 
