@@ -241,3 +241,32 @@ td { color: #e8effa; }
     grid-template-columns: 1fr;
   }
 }
+
+
+.date-range-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.date-btn {
+  appearance: none;
+  border: 1px solid rgba(255,255,255,.10);
+  background: rgba(255,255,255,.04);
+  color: var(--text);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+.date-btn.primary {
+  background: linear-gradient(135deg, rgba(79,140,255,.26), rgba(79,140,255,.14));
+  border-color: rgba(79,140,255,.30);
+}
+.date-btn:hover {
+  transform: translateY(-1px);
+}
+.date-filter-box input[type="date"] {
+  position: relative;
+  z-index: 2;
+  cursor: pointer;
+}

@@ -7,6 +7,8 @@ const APPROVED_STATUSES = new Set(['approved', 'captured', 'successful']);
 
 let rawRows = [];
 let bridgerpayApprovalRows = [];
+let globalMinDate = '';
+let globalMaxDate = '';
 
 function money(value) {
   return new Intl.NumberFormat('en-US', {
@@ -67,34 +69,59 @@ function inDateRange(dateKey, startDate, endDate) {
 }
 
 function refreshGlobalDateBounds() {
-  const allDates = [...rawRows.map(row => row.localDate), ...bridgerpayApprovalRows.map(row => row.localDate)].filter(d => d && d !== 'Invalid Date' && d.length === 10).sort();
+  const allDates = [...rawRows.map(row => row.localDate), ...bridgerpayApprovalRows.map(row => row.localDate)]
+    .filter(d => d && d !== 'Invalid Date' && d.length === 10)
+    .sort();
+
   const startEl = document.getElementById('globalStartDate');
   const endEl = document.getElementById('globalEndDate');
 
   if (!allDates.length) {
+    globalMinDate = '';
+    globalMaxDate = '';
     startEl.value = '';
     endEl.value = '';
-    startEl.min = '';
-    startEl.max = '';
-    endEl.min = '';
-    endEl.max = '';
     return;
   }
 
-  const minDate = allDates[0];
-  const maxDate = allDates[allDates.length - 1];
+  globalMinDate = allDates[0];
+  globalMaxDate = allDates[allDates.length - 1];
 
-  startEl.min = minDate;
-  startEl.max = maxDate;
-  endEl.min = minDate;
-  endEl.max = maxDate;
+  if (!startEl.value) startEl.value = globalMinDate;
+  if (!endEl.value) endEl.value = globalMaxDate;
 
-  if (!startEl.value || startEl.value < minDate || startEl.value > maxDate) startEl.value = minDate;
-  if (!endEl.value || endEl.value < minDate || endEl.value > maxDate) endEl.value = maxDate;
+  if (startEl.value < globalMinDate || startEl.value > globalMaxDate) startEl.value = globalMinDate;
+  if (endEl.value < globalMinDate || endEl.value > globalMaxDate) endEl.value = globalMaxDate;
+}
 
-  if (startEl.value > endEl.value) {
-    endEl.value = startEl.value;
+
+function applyGlobalDateFilter() {
+  const startEl = document.getElementById('globalStartDate');
+  const endEl = document.getElementById('globalEndDate');
+
+  let start = startEl.value || globalMinDate;
+  let end = endEl.value || globalMaxDate;
+
+  if (globalMinDate && start < globalMinDate) start = globalMinDate;
+  if (globalMaxDate && end > globalMaxDate) end = globalMaxDate;
+
+  if (start && end && start > end) {
+    const temp = start;
+    start = end;
+    end = temp;
   }
+
+  startEl.value = start || '';
+  endEl.value = end || '';
+  render();
+}
+
+function resetGlobalDateFilter() {
+  const startEl = document.getElementById('globalStartDate');
+  const endEl = document.getElementById('globalEndDate');
+  startEl.value = globalMinDate || '';
+  endEl.value = globalMaxDate || '';
+  render();
 }
 
 function normalizeCountry(input) {
@@ -326,7 +353,7 @@ function init() {
   bindUpload('zenUpload', 'zen', handleZenUpload, 'zenStatus');
   bindUpload('payproccUpload', 'payprocc', handlePayProccUpload, 'payproccStatus');
 
-  ['searchInput', 'pspFilter', 'sourceFilter', 'sortFilter', 'globalStartDate', 'globalEndDate'].forEach(id => {
+  ['searchInput', 'pspFilter', 'sourceFilter', 'sortFilter'].forEach(id => {
     document.getElementById(id).addEventListener('input', render);
     document.getElementById(id).addEventListener('change', render);
   });
@@ -335,6 +362,17 @@ function init() {
     document.getElementById(id).addEventListener('input', render);
     document.getElementById(id).addEventListener('change', render);
   });
+
+  ['globalStartDate', 'globalEndDate'].forEach(id => {
+    const el = document.getElementById(id);
+    el.addEventListener('change', applyGlobalDateFilter);
+    el.addEventListener('click', () => {
+      if (typeof el.showPicker === 'function') el.showPicker();
+    });
+  });
+
+  document.getElementById('applyDateFilter').addEventListener('click', applyGlobalDateFilter);
+  document.getElementById('resetDateFilter').addEventListener('click', resetGlobalDateFilter);
 
   populatePspFilter();
   populateApprovalFilters();
