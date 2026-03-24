@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Revenue Dashboard</title>
+  <title>Revenue & Approval Dashboard</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://www.gstatic.com/charts/loader.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
@@ -13,11 +13,10 @@
     <header class="hero">
       <div>
         <div class="eyebrow">Payments Analytics</div>
-        <h1>Revenue Dashboard</h1>
-        <p class="hero-sub">Upload BridgerPay, ZEN, and PayProcc files to analyze country-wise revenue, PSP performance, revenue share, and map-based distribution.</p>
+        <h1>Revenue & Approval Dashboard</h1>
       </div>
       <div class="hero-actions">
-        <span class="hero-chip">Upload-based view only</span>
+        <span class="hero-chip">Upload files to start</span>
         <span class="hero-chip">Vercel ready</span>
       </div>
     </header>
@@ -28,7 +27,7 @@
           <span class="upload-icon">⇪</span>
           <div>
             <h3>BridgerPay</h3>
-            <p>Upload your BridgerPay revenue file</p>
+            <p>Revenue + approval data</p>
           </div>
         </div>
         <input type="file" id="bridgerpayUpload" accept=".csv" />
@@ -40,7 +39,7 @@
           <span class="upload-icon">⇪</span>
           <div>
             <h3>ZEN</h3>
-            <p>Upload your ZEN settlement report</p>
+            <p>Revenue data</p>
           </div>
         </div>
         <input type="file" id="zenUpload" accept=".csv" />
@@ -52,7 +51,7 @@
           <span class="upload-icon">⇪</span>
           <div>
             <h3>PayProcc</h3>
-            <p>Upload your PayProcc transaction file</p>
+            <p>Revenue data</p>
           </div>
         </div>
         <input type="file" id="payproccUpload" accept=".csv" />
@@ -63,12 +62,19 @@
     <section id="emptyState" class="empty-state card">
       <div class="empty-icon">◌</div>
       <h2>Upload files to view dashboard</h2>
-      <p>The dashboard will appear after you upload at least one revenue file. For full comparison, upload all three sources.</p>
+      <p>The dashboard appears only after file upload.</p>
     </section>
 
     <div id="dashboard" style="display:none;">
+      <section class="section-header">
+        <div>
+          <div class="section-kicker">Revenue</div>
+          <h2>Revenue overview</h2>
+        </div>
+      </section>
+
       <section class="filters card">
-        <div class="filter">
+        <div class="filter wide">
           <label>Search by country or PSP</label>
           <input type="text" id="searchInput" placeholder="Search country or PSP" />
         </div>
@@ -98,12 +104,12 @@
         <div class="metric card accent-card">
           <div class="metric-label">Total Revenue</div>
           <div class="metric-value" id="totalRevenue">$0.00</div>
-          <div class="metric-sub">Combined from the filtered data</div>
+          <div class="metric-sub">Combined from current filter</div>
         </div>
         <div class="metric card">
           <div class="metric-label">Transactions</div>
           <div class="metric-value" id="totalTransactions">0</div>
-          <div class="metric-sub">Qualifying revenue rows</div>
+          <div class="metric-sub">Revenue rows</div>
         </div>
         <div class="metric card">
           <div class="metric-label">Top Country</div>
@@ -156,7 +162,7 @@
             <span>Global view</span>
           </div>
           <div id="geoChart" class="chart map"></div>
-          <p class="note">Darker color indicates higher revenue within the current filter.</p>
+          <p class="note">Darker color indicates higher revenue in the current filter.</p>
         </div>
         <div class="card glass-card">
           <div class="section-title-wrap">
@@ -167,47 +173,274 @@
         </div>
       </section>
 
-      <section class="card glass-card">
-        <div class="section-title-wrap">
-          <h2>Country-wise Revenue Table</h2>
-          <span>Summary</span>
-        </div>
-        <div class="table-wrap">
-          <table id="countryTable">
-            <thead>
-              <tr>
-                <th>Country</th>
-                <th>Revenue</th>
-                <th>Revenue %</th>
-                <th>Transactions</th>
-                <th>PSP Count</th>
-                <th>PSPs</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+      <section class="grid-2 bottom-gap">
+        <section class="card glass-card">
+          <div class="section-title-wrap">
+            <h2>Country-wise Revenue Table</h2>
+            <span>Summary</span>
+          </div>
+          <div class="table-wrap">
+            <table id="countryTable">
+              <thead>
+                <tr>
+                  <th>Country</th>
+                  <th>Revenue</th>
+                  <th>Revenue %</th>
+                  <th>Transactions</th>
+                  <th>PSP Count</th>
+                  <th>PSPs</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section class="card glass-card">
+          <div class="section-title-wrap">
+            <h2>PSP Country-wise Revenue Table</h2>
+            <span>Detailed</span>
+          </div>
+          <div class="table-wrap">
+            <table id="pspCountryTable">
+              <thead>
+                <tr>
+                  <th>PSP</th>
+                  <th>Country</th>
+                  <th>Revenue</th>
+                  <th>Revenue % of Total</th>
+                  <th>Transactions</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
-      <section class="card glass-card">
-        <div class="section-title-wrap">
-          <h2>PSP Country-wise Revenue Table</h2>
-          <span>Detailed view</span>
-        </div>
-        <div class="table-wrap">
-          <table id="pspCountryTable">
-            <thead>
-              <tr>
-                <th>PSP</th>
-                <th>Country</th>
-                <th>Revenue</th>
-                <th>Revenue % of Total</th>
-                <th>Transactions</th>
-              </tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-        </div>
+      <section id="approvalSection" class="approval-block" style="display:none;">
+        <section class="section-header approval-header">
+          <div>
+            <div class="section-kicker">BridgerPay</div>
+            <h2>Approval intelligence</h2>
+          </div>
+          <div class="hero-actions">
+            <span class="hero-chip">Unique merchant order logic</span>
+            <span class="hero-chip">Retry safe</span>
+          </div>
+        </section>
+
+        <section class="filters approval-filters card">
+          <div class="filter">
+            <label>PSP Type</label>
+            <select id="approvalPspTypeFilter">
+              <option value="All">All</option>
+              <option value="Card">Card</option>
+              <option value="Crypto">Crypto</option>
+              <option value="P2P">P2P</option>
+            </select>
+          </div>
+          <div class="filter">
+            <label>PSP</label>
+            <select id="approvalPspFilter"></select>
+          </div>
+          <div class="filter">
+            <label>Country</label>
+            <select id="approvalCountryFilter"></select>
+          </div>
+          <div class="filter">
+            <label>MID</label>
+            <select id="approvalMidFilter"></select>
+          </div>
+          <div class="filter wide">
+            <label>Search PSP / country / MID</label>
+            <input type="text" id="approvalSearchInput" placeholder="Search approval data" />
+          </div>
+        </section>
+
+        <section class="metrics-grid approval-metrics five-up">
+          <div class="metric card accent-card green-card">
+            <div class="metric-label">Overall Approval Ratio</div>
+            <div class="metric-value" id="approvalRatio">0.00%</div>
+            <div class="metric-sub">Approved unique orders / total unique orders</div>
+          </div>
+          <div class="metric card">
+            <div class="metric-label">Unique Orders</div>
+            <div class="metric-value" id="approvalUniqueOrders">0</div>
+            <div class="metric-sub">Deduped by merchant order ID</div>
+          </div>
+          <div class="metric card">
+            <div class="metric-label">Approved Orders</div>
+            <div class="metric-value" id="approvalApprovedOrders">0</div>
+            <div class="metric-sub">Any approved attempt counts as approved</div>
+          </div>
+          <div class="metric card">
+            <div class="metric-label">Declined Orders</div>
+            <div class="metric-value" id="approvalDeclinedOrders">0</div>
+            <div class="metric-sub">No approved attempt in current filter</div>
+          </div>
+          <div class="metric card">
+            <div class="metric-label">Retry Rate</div>
+            <div class="metric-value" id="approvalRetryRate">0.00%</div>
+            <div class="metric-sub" id="approvalRetrySub">0.00 avg attempts / order</div>
+          </div>
+        </section>
+
+        <section class="grid-2">
+          <div class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>PSP-wise Approval Ratio</h2>
+              <span>Top 10 by volume</span>
+            </div>
+            <div id="approvalPspChart" class="chart compact"></div>
+          </div>
+          <div class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>Country-wise Approval Ratio</h2>
+              <span>Top 10 by volume</span>
+            </div>
+            <div id="approvalCountryChart" class="chart compact"></div>
+          </div>
+        </section>
+
+        <section class="grid-2">
+          <div class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>MID-wise Approval Ratio</h2>
+              <span>Top 10 by volume</span>
+            </div>
+            <div id="approvalMidChart" class="chart compact"></div>
+          </div>
+          <div class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>PSP + Country Approval Ratio</h2>
+              <span>Top 10 by volume</span>
+            </div>
+            <div id="approvalPspCountryChart" class="chart compact"></div>
+          </div>
+        </section>
+
+        <section class="grid-2 bottom-gap">
+          <div class="card glass-card insights-card">
+            <div class="section-title-wrap">
+              <h2>Analysis & Insights</h2>
+              <span>Auto generated</span>
+            </div>
+            <ul id="insightsList" class="insights-list"></ul>
+          </div>
+          <div class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>Top Decline Reasons</h2>
+              <span>Current filter</span>
+            </div>
+            <div class="table-wrap short-wrap">
+              <table id="declineReasonTable">
+                <thead>
+                  <tr>
+                    <th>Decline Reason</th>
+                    <th>Attempts</th>
+                    <th>Share</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid-2">
+          <section class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>PSP-wise Approval Table</h2>
+              <span>Unique order basis</span>
+            </div>
+            <div class="table-wrap">
+              <table id="approvalPspTable">
+                <thead>
+                  <tr>
+                    <th>PSP</th>
+                    <th>Type</th>
+                    <th>Approval Ratio</th>
+                    <th>Unique Orders</th>
+                    <th>Approved</th>
+                    <th>Declined</th>
+                    <th>Retry Rate</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>Country-wise Approval Table</h2>
+              <span>Unique order basis</span>
+            </div>
+            <div class="table-wrap">
+              <table id="approvalCountryTable">
+                <thead>
+                  <tr>
+                    <th>Country</th>
+                    <th>Approval Ratio</th>
+                    <th>Unique Orders</th>
+                    <th>Approved</th>
+                    <th>Declined</th>
+                    <th>Retry Rate</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <section class="grid-2">
+          <section class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>MID-wise Approval Table</h2>
+              <span>Unique order basis</span>
+            </div>
+            <div class="table-wrap">
+              <table id="approvalMidTable">
+                <thead>
+                  <tr>
+                    <th>MID</th>
+                    <th>Approval Ratio</th>
+                    <th>Unique Orders</th>
+                    <th>Approved</th>
+                    <th>Declined</th>
+                    <th>Retry Rate</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="card glass-card">
+            <div class="section-title-wrap">
+              <h2>PSP + Country Approval Table</h2>
+              <span>Unique order basis</span>
+            </div>
+            <div class="table-wrap">
+              <table id="approvalPspCountryTable">
+                <thead>
+                  <tr>
+                    <th>PSP</th>
+                    <th>Country</th>
+                    <th>Approval Ratio</th>
+                    <th>Unique Orders</th>
+                    <th>Approved</th>
+                    <th>Declined</th>
+                    <th>Retry Rate</th>
+                  </tr>
+                </thead>
+                <tbody></tbody>
+              </table>
+            </div>
+          </section>
+        </section>
       </section>
     </div>
   </div>

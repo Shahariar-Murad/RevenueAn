@@ -3,11 +3,17 @@ google.charts.setOnLoadCallback(init);
 
 const COUNTRY_NAMES = new Intl.DisplayNames(['en'], { type: 'region' });
 const COUNTRY_FIXES = { UK: 'GB', EL: 'GR' };
+const APPROVED_STATUSES = new Set(['approved', 'captured', 'successful']);
 
 let rawRows = [];
+let bridgerpayApprovalRows = [];
 
 function money(value) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(value || 0);
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    maximumFractionDigits: 2,
+  }).format(value || 0);
 }
 
 function pct(value) {
@@ -24,17 +30,68 @@ function normalizeCountry(input) {
   const fixed = COUNTRY_FIXES[raw] || raw;
   if (!fixed) return { code: 'ZZ', name: 'Unknown' };
   if (fixed.length === 2) return { code: fixed, name: COUNTRY_NAMES.of(fixed) || fixed };
-  return { code: 'ZZ', name: raw };
+  return { code: 'ZZ', name: input || 'Unknown' };
 }
 
-function parseBridgerPay(rows) {
+function normalizeText(value, fallback = 'Unknown') {
+  const text = String(value || '').trim();
+  return text || fallback;
+}
+
+function getPspType(pspName) {
+  const key = String(pspName || '').trim().toLowerCase();
+  if (key.includes('confirmo')) return 'Crypto';
+  if (key.includes('paypal')) return 'P2P';
+  return 'Card';
+}
+
+function approvalStatus(status) {
+  const value = String(status || '').trim().toLowerCase();
+  return APPROVED_STATUSES.has(value);
+}
+
+function getOrderKey(row) {
+  return normalizeText(row.merchantOrderId || row.merchant_order_id || row.order_id || row.transactionId || row.id, 'Unknown Order');
+}
+
+function parseBridgerPayRevenue(rows) {
   return rows
-    .filter(row => String(row.status || '').toLowerCase() === 'approved')
+    .filter(row => approvalStatus(row.status))
     .map(row => {
       const country = normalizeCountry(row.country || row.cardCountry);
-      return { source: 'bridgerpay', psp: row.pspName || 'BridgerPay', country: country.name, code: country.code, revenue: parseNumber(row.amount) };
+      return {
+        source: 'bridgerpay',
+        psp: normalizeText(row.pspName, 'BridgerPay'),
+        country: country.name,
+        code: country.code,
+        revenue: parseNumber(row.amount),
+      };
     })
     .filter(row => row.revenue > 0);
+}
+
+function parseBridgerPayApproval(rows) {
+  return rows
+    .filter(row => String(row.type || '').trim().toLowerCase() !== 'refund')
+    .map(row => {
+      const country = normalizeCountry(row.country || row.cardCountry);
+      const psp = normalizeText(row.pspName, 'Unknown PSP');
+      return {
+        orderKey: getOrderKey(row),
+        attemptId: normalizeText(row.id || row.transactionId || `${getOrderKey(row)}-${Math.random()}`),
+        psp,
+        pspType: getPspType(psp),
+        country: country.name,
+        code: country.code,
+        mid: normalizeText(row.midAlias, 'Unknown MID'),
+        status: normalizeText(row.status, 'unknown'),
+        approved: approvalStatus(row.status),
+        declineReason: normalizeText(row.declineReason, 'Unknown'),
+        amount: parseNumber(row.amount),
+        processingDate: normalizeText(row.processing_date || row.processingDate || row.completionDate, ''),
+      };
+    })
+    .filter(row => row.orderKey !== 'Unknown Order');
 }
 
 function parseZen(rows) {
@@ -42,7 +99,13 @@ function parseZen(rows) {
     .filter(row => String(row.transaction_type || '').toLowerCase() === 'purchase')
     .map(row => {
       const country = normalizeCountry(row.customer_country || row.card_country);
-      return { source: 'zen', psp: 'ZEN', country: country.name, code: country.code, revenue: parseNumber(row.stl_amount || row.transaction_amount) };
+      return {
+        source: 'zen',
+        psp: 'ZEN',
+        country: country.name,
+        code: country.code,
+        revenue: parseNumber(row.stl_amount || row.transaction_amount),
+      };
     })
     .filter(row => row.revenue > 0);
 }
@@ -53,7 +116,13 @@ function parsePayProcc(rows) {
     .filter(row => String(row.Type || '').toLowerCase() === 'sale')
     .map(row => {
       const country = normalizeCountry(row['Payer Country'] || row['Issuer Country']);
-      return { source: 'payprocc', psp: 'PayProcc', country: country.name, code: country.code, revenue: parseNumber(row['Applied Amount']) || parseNumber(row.Amount) };
+      return {
+        source: 'payprocc',
+        psp: 'PayProcc',
+        country: country.name,
+        code: country.code,
+        revenue: parseNumber(row['Applied Amount']) || parseNumber(row.Amount),
+      };
     })
     .filter(row => row.revenue > 0);
 }
@@ -98,20 +167,104 @@ function aggregateByPspCountry(rows, totalRevenue) {
   return Array.from(map.values()).map(item => ({ ...item, revenueShare: totalRevenue ? (item.revenue / totalRevenue) * 100 : 0 }));
 }
 
+function summarizeApproval(rows) {
+  const orders = new Map();
+  const declineReasons = new Map();
+  let totalAttempts = 0;
+
+  rows.forEach(row => {
+    totalAttempts += 1;
+    const key = row.orderKey;
+    const current = orders.get(key) || {
+      approved: false,
+      attempts: 0,
+      totalAmount: 0,
+      latestDate: '',
+    };
+    current.approved = current.approved || row.approved;
+    current.attempts += 1;
+    current.totalAmount += row.amount || 0;
+    current.latestDate = row.processingDate > current.latestDate ? row.processingDate : current.latestDate;
+    orders.set(key, current);
+
+    if (!row.approved) {
+      const reason = row.declineReason || 'Unknown';
+      declineReasons.set(reason, (declineReasons.get(reason) || 0) + 1);
+    }
+  });
+
+  const total = orders.size;
+  const approved = Array.from(orders.values()).filter(item => item.approved).length;
+  const declined = total - approved;
+  const retried = Array.from(orders.values()).filter(item => item.attempts > 1).length;
+  const retryRate = total ? (retried / total) * 100 : 0;
+  const ratio = total ? (approved / total) * 100 : 0;
+  const avgAttempts = total ? totalAttempts / total : 0;
+
+  return {
+    total,
+    approved,
+    declined,
+    retried,
+    totalAttempts,
+    retryRate,
+    ratio,
+    avgAttempts,
+    declineReasons,
+  };
+}
+
+function buildApprovalGroups(rows, keyBuilder, labelBuilder, extraBuilder = () => ({})) {
+  const grouped = new Map();
+  rows.forEach(row => {
+    const key = keyBuilder(row);
+    if (!grouped.has(key)) grouped.set(key, []);
+    grouped.get(key).push(row);
+  });
+
+  return Array.from(grouped.entries()).map(([key, groupRows]) => {
+    const summary = summarizeApproval(groupRows);
+    return {
+      key,
+      label: labelBuilder(groupRows[0]),
+      ...extraBuilder(groupRows[0]),
+      ...summary,
+    };
+  });
+}
+
+function getTopItems(rows, count = 10) {
+  return [...rows].sort((a, b) => b.total - a.total || b.ratio - a.ratio).slice(0, count);
+}
+
+function populateSelectOptions(selectId, values) {
+  const select = document.getElementById(selectId);
+  const current = select.value || 'All';
+  const options = ['All', ...Array.from(new Set(values)).filter(Boolean).sort((a, b) => String(a).localeCompare(String(b)))];
+  select.innerHTML = options.map(item => `<option value="${escapeHtml(item)}">${escapeHtml(item)}</option>`).join('');
+  select.value = options.includes(current) ? current : 'All';
+}
+
 function init() {
-  bindUpload('bridgerpayUpload', 'bridgerpay', parseBridgerPay, 'bridgerpayStatus');
-  bindUpload('zenUpload', 'zen', parseZen, 'zenStatus');
-  bindUpload('payproccUpload', 'payprocc', parsePayProcc, 'payproccStatus');
+  bindUpload('bridgerpayUpload', 'bridgerpay', handleBridgerPayUpload, 'bridgerpayStatus');
+  bindUpload('zenUpload', 'zen', handleZenUpload, 'zenStatus');
+  bindUpload('payproccUpload', 'payprocc', handlePayProccUpload, 'payproccStatus');
 
   ['searchInput', 'pspFilter', 'sourceFilter', 'sortFilter'].forEach(id => {
     document.getElementById(id).addEventListener('input', render);
     document.getElementById(id).addEventListener('change', render);
   });
 
+  ['approvalPspTypeFilter', 'approvalPspFilter', 'approvalCountryFilter', 'approvalMidFilter', 'approvalSearchInput'].forEach(id => {
+    document.getElementById(id).addEventListener('input', render);
+    document.getElementById(id).addEventListener('change', render);
+  });
+
   populatePspFilter();
+  populateApprovalFilters();
 }
 
-function bindUpload(inputId, sourceKey, parser, statusId) {
+function bindUpload(inputId, sourceKey, handler, statusId) {
   document.getElementById(inputId).addEventListener('change', (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -119,36 +272,72 @@ function bindUpload(inputId, sourceKey, parser, statusId) {
       header: true,
       skipEmptyLines: true,
       complete: (results) => {
-        const parsed = parser(results.data || []);
-        rawRows = [...rawRows.filter(row => row.source !== sourceKey), ...parsed];
-        updateFileStatus(statusId, file.name, parsed.length);
+        handler(results.data || []);
+        updateFileStatus(statusId, file.name, results.data.length);
         populatePspFilter();
+        populateApprovalFilters();
         render();
+      },
+      error: () => {
+        document.getElementById(statusId).textContent = `Could not parse ${file.name}`;
       }
     });
   });
 }
 
+function handleBridgerPayUpload(rows) {
+  const revenueRows = parseBridgerPayRevenue(rows);
+  rawRows = [...rawRows.filter(row => row.source !== 'bridgerpay'), ...revenueRows];
+  bridgerpayApprovalRows = parseBridgerPayApproval(rows);
+}
+
+function handleZenUpload(rows) {
+  const parsed = parseZen(rows);
+  rawRows = [...rawRows.filter(row => row.source !== 'zen'), ...parsed];
+}
+
+function handlePayProccUpload(rows) {
+  const parsed = parsePayProcc(rows);
+  rawRows = [...rawRows.filter(row => row.source !== 'payprocc'), ...parsed];
+}
+
 function updateFileStatus(statusId, fileName, rowCount) {
   const el = document.getElementById(statusId);
-  el.textContent = `${fileName} • ${rowCount.toLocaleString()} qualifying rows`;
+  el.textContent = `${fileName} • ${Number(rowCount || 0).toLocaleString()} rows loaded`;
   el.classList.add('loaded');
 }
 
 function populatePspFilter() {
-  const select = document.getElementById('pspFilter');
-  const current = select.value || 'All';
-  const psps = ['All', ...Array.from(new Set(rawRows.map(row => row.psp))).sort()];
-  select.innerHTML = psps.map(psp => `<option value="${psp}">${psp}</option>`).join('');
-  select.value = psps.includes(current) ? current : 'All';
+  populateSelectOptions('pspFilter', rawRows.map(row => row.psp));
+}
+
+function populateApprovalFilters() {
+  populateSelectOptions('approvalPspFilter', bridgerpayApprovalRows.map(row => row.psp));
+  populateSelectOptions('approvalCountryFilter', bridgerpayApprovalRows.map(row => row.country));
+  populateSelectOptions('approvalMidFilter', bridgerpayApprovalRows.map(row => row.mid));
 }
 
 function render() {
-  const hasData = rawRows.length > 0;
-  document.getElementById('emptyState').style.display = hasData ? 'none' : 'block';
-  document.getElementById('dashboard').style.display = hasData ? 'block' : 'none';
-  if (!hasData) return;
+  const hasRevenueData = rawRows.length > 0;
+  const hasApprovalData = bridgerpayApprovalRows.length > 0;
+  const hasAnyData = hasRevenueData || hasApprovalData;
 
+  document.getElementById('emptyState').style.display = hasAnyData ? 'none' : 'block';
+  document.getElementById('dashboard').style.display = hasAnyData ? 'block' : 'none';
+  document.getElementById('approvalSection').style.display = hasApprovalData ? 'block' : 'none';
+
+  if (hasRevenueData) {
+    renderRevenue();
+  } else {
+    resetRevenueState();
+  }
+
+  if (hasApprovalData) {
+    renderApproval();
+  }
+}
+
+function renderRevenue() {
   const search = document.getElementById('searchInput').value.trim().toLowerCase();
   const selectedPsp = document.getElementById('pspFilter').value;
   const selectedSource = document.getElementById('sourceFilter').value;
@@ -171,7 +360,7 @@ function render() {
   pspData.sort((a, b) => b.revenue - a.revenue);
   pspCountryData.sort((a, b) => b.revenue - a.revenue);
 
-  updateMetrics(totalRevenue, totalTransactions, countryData, pspData, pspCountryData);
+  updateRevenueMetrics(totalRevenue, totalTransactions, countryData, pspData, pspCountryData);
   drawCountryBar(countryData.slice(0, 10));
   drawPspPie(pspData);
   drawGeoChart(countryData);
@@ -180,7 +369,54 @@ function render() {
   fillPspCountryTable(pspCountryData);
 }
 
-function updateMetrics(totalRevenue, totalTransactions, countryData, pspData, pspCountryData) {
+function renderApproval() {
+  const pspType = document.getElementById('approvalPspTypeFilter').value;
+  const psp = document.getElementById('approvalPspFilter').value;
+  const country = document.getElementById('approvalCountryFilter').value;
+  const mid = document.getElementById('approvalMidFilter').value;
+  const search = document.getElementById('approvalSearchInput').value.trim().toLowerCase();
+
+  const filtered = bridgerpayApprovalRows.filter(row => {
+    const typeOk = pspType === 'All' || row.pspType === pspType;
+    const pspOk = psp === 'All' || row.psp === psp;
+    const countryOk = country === 'All' || row.country === country;
+    const midOk = mid === 'All' || row.mid === mid;
+    const searchOk = !search || row.psp.toLowerCase().includes(search) || row.country.toLowerCase().includes(search) || row.mid.toLowerCase().includes(search);
+    return typeOk && pspOk && countryOk && midOk && searchOk;
+  });
+
+  const overall = summarizeApproval(filtered);
+  const byPsp = buildApprovalGroups(filtered, row => row.psp, row => row.psp, row => ({ pspType: row.pspType }));
+  const byCountry = buildApprovalGroups(filtered, row => row.country, row => row.country);
+  const byMid = buildApprovalGroups(filtered, row => row.mid, row => row.mid);
+  const byPspCountry = buildApprovalGroups(filtered, row => `${row.psp}__${row.country}`, row => `${row.psp} • ${row.country}`, row => ({ psp: row.psp, country: row.country }));
+
+  byPsp.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
+  byCountry.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
+  byMid.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
+  byPspCountry.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
+
+  updateApprovalMetrics(overall);
+  drawApprovalBar('approvalPspChart', getTopItems(byPsp), 'label', '#4f8cff');
+  drawApprovalBar('approvalCountryChart', getTopItems(byCountry), 'label', '#16c2a3');
+  drawApprovalBar('approvalMidChart', getTopItems(byMid), 'label', '#8b5cf6');
+  drawApprovalBar('approvalPspCountryChart', getTopItems(byPspCountry), 'label', '#f97316');
+
+  fillApprovalPspTable(byPsp);
+  fillApprovalCountryTable(byCountry);
+  fillApprovalMidTable(byMid);
+  fillApprovalPspCountryTable(byPspCountry);
+  fillDeclineReasonTable(overall.declineReasons, overall.totalAttempts);
+  fillInsights(generateInsights({ filtered, overall, byPsp, byCountry, byMid, byPspCountry }));
+}
+
+function resetRevenueState() {
+  updateRevenueMetrics(0, 0, [], [], []);
+  fillCountryTable([]);
+  fillPspCountryTable([]);
+}
+
+function updateRevenueMetrics(totalRevenue, totalTransactions, countryData, pspData, pspCountryData) {
   const topCountry = countryData[0];
   const topPsp = pspData[0];
 
@@ -195,6 +431,15 @@ function updateMetrics(totalRevenue, totalTransactions, countryData, pspData, ps
   document.getElementById('pairCount').textContent = pspCountryData.length.toLocaleString();
 }
 
+function updateApprovalMetrics(overall) {
+  document.getElementById('approvalRatio').textContent = pct(overall.ratio);
+  document.getElementById('approvalUniqueOrders').textContent = overall.total.toLocaleString();
+  document.getElementById('approvalApprovedOrders').textContent = overall.approved.toLocaleString();
+  document.getElementById('approvalDeclinedOrders').textContent = overall.declined.toLocaleString();
+  document.getElementById('approvalRetryRate').textContent = pct(overall.retryRate);
+  document.getElementById('approvalRetrySub').textContent = `${overall.avgAttempts.toFixed(2)} avg attempts / order`;
+}
+
 function drawCountryBar(rows) {
   const data = new google.visualization.DataTable();
   data.addColumn('string', 'Country');
@@ -202,14 +447,7 @@ function drawCountryBar(rows) {
   rows.forEach(row => data.addRow([row.country, row.revenue]));
 
   const chart = new google.visualization.ColumnChart(document.getElementById('countryBarChart'));
-  chart.draw(data, {
-    legend: 'none',
-    colors: ['#4f8cff'],
-    backgroundColor: 'transparent',
-    chartArea: { left: 60, right: 20, top: 20, bottom: 80, width: '100%', height: '70%' },
-    hAxis: { slantedText: true, slantedTextAngle: 35, textStyle: { color: '#dbeafe' } },
-    vAxis: { format: 'short', textStyle: { color: '#dbeafe' }, gridlines: { color: 'rgba(255,255,255,0.08)' } },
-  });
+  chart.draw(data, columnChartOptions('#4f8cff', true));
 }
 
 function drawPspPie(rows) {
@@ -223,8 +461,8 @@ function drawPspPie(rows) {
     pieHole: 0.55,
     backgroundColor: 'transparent',
     chartArea: { left: 20, right: 20, top: 20, bottom: 20, width: '100%', height: '85%' },
-    colors: ['#4f8cff', '#16c2a3', '#8b5cf6', '#f97316', '#06b6d4'],
-    legend: { textStyle: { color: '#dbeafe' } }
+    colors: ['#4f8cff', '#16c2a3', '#8b5cf6', '#f97316', '#06b6d4', '#f43f5e'],
+    legend: { textStyle: { color: '#dbeafe' } },
   });
 }
 
@@ -253,14 +491,53 @@ function drawPspCountryBar(rows) {
   rows.forEach(row => data.addRow([`${row.psp} • ${row.country}`, row.revenue]));
 
   const chart = new google.visualization.BarChart(document.getElementById('pspCountryChart'));
+  chart.draw(data, horizontalBarOptions('#16c2a3', 160));
+}
+
+function drawApprovalBar(elementId, rows, labelKey, color) {
+  const data = new google.visualization.DataTable();
+  data.addColumn('string', 'Group');
+  data.addColumn('number', 'Approval Ratio');
+  rows.forEach(row => data.addRow([row[labelKey], Number(row.ratio.toFixed(2))]));
+
+  const chart = new google.visualization.BarChart(document.getElementById(elementId));
   chart.draw(data, {
     legend: 'none',
-    colors: ['#16c2a3'],
+    colors: [color],
     backgroundColor: 'transparent',
-    chartArea: { left: 160, right: 20, top: 20, bottom: 20, width: '70%', height: '75%' },
+    chartArea: { left: 170, right: 30, top: 20, bottom: 20, width: '68%', height: '75%' },
+    hAxis: {
+      minValue: 0,
+      maxValue: 100,
+      format: "0'%'",
+      textStyle: { color: '#dbeafe' },
+      gridlines: { color: 'rgba(255,255,255,0.08)' },
+    },
+    vAxis: { textStyle: { color: '#dbeafe' } },
+    annotations: { textStyle: { color: '#edf4ff', fontSize: 12 } },
+  });
+}
+
+function columnChartOptions(color, slanted = false) {
+  return {
+    legend: 'none',
+    colors: [color],
+    backgroundColor: 'transparent',
+    chartArea: { left: 60, right: 20, top: 20, bottom: 80, width: '100%', height: '70%' },
+    hAxis: { slantedText: slanted, slantedTextAngle: 35, textStyle: { color: '#dbeafe' } },
+    vAxis: { format: 'short', textStyle: { color: '#dbeafe' }, gridlines: { color: 'rgba(255,255,255,0.08)' } },
+  };
+}
+
+function horizontalBarOptions(color, left) {
+  return {
+    legend: 'none',
+    colors: [color],
+    backgroundColor: 'transparent',
+    chartArea: { left, right: 20, top: 20, bottom: 20, width: '70%', height: '75%' },
     hAxis: { format: 'short', textStyle: { color: '#dbeafe' }, gridlines: { color: 'rgba(255,255,255,0.08)' } },
     vAxis: { textStyle: { color: '#dbeafe' } },
-  });
+  };
 }
 
 function fillCountryTable(rows) {
@@ -298,10 +575,156 @@ function fillPspCountryTable(rows) {
   `).join('');
 }
 
+function fillApprovalPspTable(rows) {
+  fillApprovalTable('#approvalPspTable tbody', rows, row => `
+    <tr>
+      <td>${escapeHtml(row.label)}</td>
+      <td>${renderTypeBadge(row.pspType)}</td>
+      <td class="right">${pct(row.ratio)}</td>
+      <td class="right">${row.total.toLocaleString()}</td>
+      <td class="right">${row.approved.toLocaleString()}</td>
+      <td class="right">${row.declined.toLocaleString()}</td>
+      <td class="right">${pct(row.retryRate)}</td>
+    </tr>
+  `, 7);
+}
+
+function fillApprovalCountryTable(rows) {
+  fillApprovalTable('#approvalCountryTable tbody', rows, row => `
+    <tr>
+      <td>${escapeHtml(row.label)}</td>
+      <td class="right">${pct(row.ratio)}</td>
+      <td class="right">${row.total.toLocaleString()}</td>
+      <td class="right">${row.approved.toLocaleString()}</td>
+      <td class="right">${row.declined.toLocaleString()}</td>
+      <td class="right">${pct(row.retryRate)}</td>
+    </tr>
+  `, 6);
+}
+
+function fillApprovalMidTable(rows) {
+  fillApprovalTable('#approvalMidTable tbody', rows, row => `
+    <tr>
+      <td>${escapeHtml(row.label)}</td>
+      <td class="right">${pct(row.ratio)}</td>
+      <td class="right">${row.total.toLocaleString()}</td>
+      <td class="right">${row.approved.toLocaleString()}</td>
+      <td class="right">${row.declined.toLocaleString()}</td>
+      <td class="right">${pct(row.retryRate)}</td>
+    </tr>
+  `, 6);
+}
+
+function fillApprovalPspCountryTable(rows) {
+  fillApprovalTable('#approvalPspCountryTable tbody', rows, row => `
+    <tr>
+      <td>${escapeHtml(row.psp)}</td>
+      <td>${escapeHtml(row.country)}</td>
+      <td class="right">${pct(row.ratio)}</td>
+      <td class="right">${row.total.toLocaleString()}</td>
+      <td class="right">${row.approved.toLocaleString()}</td>
+      <td class="right">${row.declined.toLocaleString()}</td>
+      <td class="right">${pct(row.retryRate)}</td>
+    </tr>
+  `, 7);
+}
+
+function fillApprovalTable(selector, rows, rowRenderer, colspan) {
+  const tbody = document.querySelector(selector);
+  if (!rows.length) {
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="${colspan}">No rows match the current filter.</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = rows.map(rowRenderer).join('');
+}
+
+function fillDeclineReasonTable(reasonMap, totalAttempts) {
+  const tbody = document.querySelector('#declineReasonTable tbody');
+  const allRows = Array.from(reasonMap.entries()).sort((a, b) => b[1] - a[1]);
+  const rows = allRows.slice(0, 12);
+  const declinedAttempts = allRows.reduce((sum, [, count]) => sum + count, 0);
+  if (!rows.length) {
+    tbody.innerHTML = '<tr class="empty-row"><td colspan="3">No declined attempts in the current filter.</td></tr>';
+    return;
+  }
+  const base = declinedAttempts || totalAttempts || 1;
+  tbody.innerHTML = rows.map(([reason, count]) => `
+    <tr>
+      <td>${escapeHtml(reason)}</td>
+      <td class="right">${count.toLocaleString()}</td>
+      <td class="right">${pct((count / base) * 100)}</td>
+    </tr>
+  `).join('');
+}
+
+function renderTypeBadge(type) {
+  const safeType = escapeHtml(type || 'Card');
+  const className = String(type || 'card').toLowerCase();
+  return `<span class="badge type-${className}">${safeType}</span>`;
+}
+
+function generateInsights({ filtered, overall, byPsp, byCountry, byMid, byPspCountry }) {
+  const insights = [];
+  const minVolume = 20;
+
+  insights.push(`Overall approval ratio is ${pct(overall.ratio)} across ${overall.total.toLocaleString()} unique orders. Retry rate is ${pct(overall.retryRate)} with ${overall.avgAttempts.toFixed(2)} attempts per order.`);
+
+  const typeSummary = buildApprovalGroups(filtered, row => row.pspType, row => row.pspType);
+  typeSummary.sort((a, b) => b.total - a.total);
+  if (typeSummary.length) {
+    const typeLine = typeSummary
+      .map(item => `${item.label}: ${pct(item.ratio)} on ${item.total.toLocaleString()} orders`)
+      .join(' · ');
+    insights.push(`PSP type split — ${typeLine}.`);
+  }
+
+  const weakPsp = byPsp.filter(item => item.total >= minVolume).sort((a, b) => a.ratio - b.ratio)[0];
+  if (weakPsp) {
+    insights.push(`Lowest PSP approval in the current filter is ${weakPsp.label} at ${pct(weakPsp.ratio)} on ${weakPsp.total.toLocaleString()} unique orders.`);
+  }
+
+  const weakCountry = byCountry.filter(item => item.total >= minVolume).sort((a, b) => a.ratio - b.ratio)[0];
+  if (weakCountry) {
+    insights.push(`Country to review first: ${weakCountry.label} at ${pct(weakCountry.ratio)} with ${weakCountry.declined.toLocaleString()} declined unique orders.`);
+  }
+
+  const weakMid = byMid.filter(item => item.total >= minVolume).sort((a, b) => a.ratio - b.ratio)[0];
+  if (weakMid) {
+    insights.push(`MID attention point: ${weakMid.label} is at ${pct(weakMid.ratio)} approval with ${pct(weakMid.retryRate)} retry rate.`);
+  }
+
+  const retryHotspot = [...byPspCountry].filter(item => item.total >= 10).sort((a, b) => b.retryRate - a.retryRate)[0];
+  if (retryHotspot) {
+    insights.push(`Highest retry pressure is ${retryHotspot.label} with ${pct(retryHotspot.retryRate)} retry rate across ${retryHotspot.total.toLocaleString()} unique orders.`);
+  }
+
+  const declineReasons = summarizeApproval(filtered).declineReasons;
+  const topReason = Array.from(declineReasons.entries()).sort((a, b) => b[1] - a[1])[0];
+  if (topReason) {
+    insights.push(`Top decline reason by attempts is “${topReason[0]}” with ${topReason[1].toLocaleString()} occurrences.`);
+  }
+
+  return insights.slice(0, 6);
+}
+
+function fillInsights(items) {
+  const list = document.getElementById('insightsList');
+  if (!items.length) {
+    list.innerHTML = '<li>Upload BridgerPay data to generate insights.</li>';
+    return;
+  }
+  list.innerHTML = items.map(item => `<li>${escapeHtml(item)}</li>`).join('');
+}
+
 function escapeHtml(value) {
-  return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
 }
 
 window.addEventListener('resize', () => {
-  if (rawRows.length) render();
+  if (rawRows.length || bridgerpayApprovalRows.length) render();
 });
