@@ -9,6 +9,8 @@ let rawRows = [];
 let bridgerpayApprovalRows = [];
 let globalMinDate = '';
 let globalMaxDate = '';
+let latestRevenueCountryData = [];
+let latestApprovalCountryData = [];
 
 function money(value) {
   return new Intl.NumberFormat('en-US', {
@@ -445,11 +447,16 @@ function render() {
   if (hasRevenueData) {
     renderRevenue();
   } else {
+    latestRevenueCountryData = [];
     resetRevenueState();
+    renderCountryComparisonTable();
   }
 
   if (hasApprovalData) {
     renderApproval();
+  } else {
+    latestApprovalCountryData = [];
+    renderCountryComparisonTable();
   }
 }
 
@@ -479,6 +486,7 @@ function renderRevenue() {
   pspData.sort((a, b) => b.revenue - a.revenue);
   pspCountryData.sort((a, b) => b.revenue - a.revenue);
 
+  latestRevenueCountryData = countryData;
   updateRevenueMetrics(totalRevenue, totalTransactions, countryData, pspData, pspCountryData);
   drawCountryBar(countryData.slice(0, 10));
   drawPspPie(pspData);
@@ -486,6 +494,7 @@ function renderRevenue() {
   drawPspCountryBar(pspCountryData.slice(0, 10));
   fillCountryTable(countryData);
   fillPspCountryTable(pspCountryData);
+  renderCountryComparisonTable();
 }
 
 function renderApproval() {
@@ -518,6 +527,7 @@ function renderApproval() {
   byMid.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
   byPspCountry.sort((a, b) => b.total - a.total || b.ratio - a.ratio);
 
+  latestApprovalCountryData = byCountry;
   updateApprovalMetrics(overall);
   updateExecutiveSummaryCards(filtered);
   drawApprovalBar('approvalPspChart', getTopItems(byPsp), 'label', '#4f8cff');
@@ -531,6 +541,7 @@ function renderApproval() {
   fillApprovalPspCountryTable(byPspCountry);
   fillDeclineReasonTable(overall.declineReasons, overall.totalAttempts);
   fillInsights(generateInsights({ filtered, overall, byPsp, byCountry, byMid, byPspCountry }));
+  renderCountryComparisonTable();
 }
 
 function resetRevenueState() {
@@ -678,6 +689,46 @@ function horizontalBarOptions(color, left) {
     hAxis: { format: 'short', textStyle: { color: '#dbeafe' }, gridlines: { color: 'rgba(255,255,255,0.08)' } },
     vAxis: { textStyle: { color: '#dbeafe' } },
   };
+}
+
+
+function renderCountryComparisonTable() {
+  const revenueMap = new Map(latestRevenueCountryData.map(row => [row.country, row]));
+  const approvalMap = new Map(latestApprovalCountryData.map(row => [row.label, row]));
+
+  const countries = Array.from(new Set([
+    ...latestRevenueCountryData.map(row => row.country),
+    ...latestApprovalCountryData.map(row => row.label)
+  ]));
+
+  const rows = countries.map(country => {
+    const revenueRow = revenueMap.get(country);
+    const approvalRow = approvalMap.get(country);
+    return {
+      country,
+      revenue: revenueRow?.revenue || 0,
+      revenueShare: revenueRow?.revenueShare || 0,
+      transactions: revenueRow?.transactions || 0,
+      approvalRatio: approvalRow ? approvalRow.ratio : null,
+    };
+  }).sort((a, b) => b.revenue - a.revenue || ((b.approvalRatio ?? -1) - (a.approvalRatio ?? -1)));
+
+  const tbody = document.querySelector('#countryComparisonTable tbody');
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6">Upload files to see the country comparison table.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = rows.map((row, index) => `
+    <tr>
+      <td><span class="number-badge">${index + 1}</span></td>
+      <td>${escapeHtml(row.country)}</td>
+      <td>${money(row.revenue)}</td>
+      <td>${pct(row.revenueShare)}</td>
+      <td>${row.approvalRatio === null ? 'N/A' : pct(row.approvalRatio)}</td>
+      <td>${row.transactions.toLocaleString()}</td>
+    </tr>
+  `).join('');
 }
 
 function fillCountryTable(rows) {

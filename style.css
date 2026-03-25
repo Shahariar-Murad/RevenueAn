@@ -270,3 +270,24 @@ td { color: #e8effa; }
   z-index: 2;
   cursor: pointer;
 }
+
+
+.table-note {
+  color: var(--muted);
+  font-size: 12px;
+  margin: -4px 0 12px;
+  line-height: 1.5;
+}
+.number-badge {
+  display: inline-flex;
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(79,140,255,.12);
+  border: 1px solid rgba(79,140,255,.22);
+  color: #dbeafe;
+  font-weight: 700;
+}
